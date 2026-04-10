@@ -1,0 +1,74 @@
+name: AI Test Agent
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  generate-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # 1. Checkout repo with full history (REQUIRED for diff)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. Ensure base branch exists for diff
+      - name: Fetch base branch
+        run: git fetch origin "${{ github.base_ref }}" --depth=1
+
+      # 3. Setup Python (agent runs on Python)
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 4. Run AI Test Agent
+      - name: Run AI Test Agent
+        uses: harshith-56/UNIT-TEST-AGENT@v46
+        with:
+          llm_api_url: ${{ secrets.LLM_API_URL }}
+          llm_api_key: ${{ secrets.LLM_API_KEY }}
+          llm_model: ${{ secrets.LLM_MODEL }}
+          project_context: ${{ secrets.PROJECT_CONTEXT }}
+          comment_on_pr: "true"
+
+      # 5. Debug generated files
+      - name: Debug generated test files
+        run: |
+          echo "=== tests/ai_generated contents ==="
+          ls -R tests/ai_generated || echo "Directory not found"
+          echo "=== mapping file ==="
+          cat tests/ai_generated/.ai_test_mapping.json 2>/dev/null || echo "No mapping file"
+
+      # 6. Clean Python cache files before commit
+      - name: Clean Python cache files
+        run: |
+          if [ -d "tests/ai_generated" ]; then
+            find tests/ai_generated -name "__pycache__" -type d -exec rm -rf {} +
+            find tests/ai_generated -name "*.pyc" -delete
+          fi
+
+      # 7. Commit generated tests
+      - name: Commit generated tests
+        run: |
+          git config user.name "harshith-56"
+          git config user.email "harshithreddy3737@gmail.com"
+
+          if [ ! -d "tests/ai_generated" ]; then
+            echo "tests/ai_generated directory not found, skipping commit"
+            exit 0
+          fi
+
+          git add tests/ai_generated/
+
+          if git diff --cached --quiet; then
+            echo "No new tests generated"
+            exit 0
+          fi
+
+          git commit -m "AI generated unit tests"
+          git push origin HEAD:${{ github.head_ref }}
